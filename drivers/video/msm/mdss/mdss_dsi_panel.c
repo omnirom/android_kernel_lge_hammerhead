@@ -26,9 +26,12 @@
 #include <linux/ctype.h>
 #endif
 
+#include <asm/system_info.h>
+
 #include "mdss_dsi.h"
 
 #define DT_CMD_HDR 6
+#define GAMMA_COMPAT 11
 
 static bool mdss_panel_flip_ud = false;
 static int mdss_panel_id = PANEL_QCOM;
@@ -40,6 +43,8 @@ extern void lm3630_lcd_backlight_set_level(int level);
 #endif
 
 static struct mdss_dsi_phy_ctrl phy_params;
+static struct mdss_panel_common_pdata *local_pdata;
+struct mdss_panel_data *cmds_panel_data;
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -288,8 +293,8 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
-	if (ctrl->on_cmds.cmd_cnt)
-		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+	if (local_pdata->on_cmds.cmd_cnt)
+		mdss_dsi_panel_cmds_send(ctrl, &local_pdata->on_cmds);
 
 	pr_info("%s\n", __func__);
 	return 0;
@@ -1061,6 +1066,183 @@ static int debug_fs_init(struct mdss_panel_common_pdata *panel_data)
 }
 #endif
 
+static int read_local_on_cmds(char *buf, size_t cmd)
+{
+	int i, len = 0;
+	int dlen;
+
+	if (system_rev != GAMMA_COMPAT) {
+		pr_err("Incompatible hardware revision: %d\n", system_rev);
+		return -EINVAL;
+	}
+
+	dlen = local_pdata->on_cmds.cmds[cmd].dchdr.dlen - 1;
+	if (!dlen)
+		return -ENOMEM;
+
+	/* don't print first and last bits */
+	for (i = 1; i < dlen; i++)
+		len += sprintf(buf + len, "%d ",
+			       local_pdata->on_cmds.cmds[cmd].payload[i]);
+
+	len += sprintf(buf + len, "\n");
+
+	return len;
+}
+
+static unsigned int cnt;
+
+static int write_local_on_cmds(struct device *dev, const char *buf,
+			       size_t cmd)
+{
+	int i, rc = 0;
+	int dlen;
+	unsigned int val;
+	char tmp[3];
+	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+	struct mdss_panel_common_pdata *prev_local_data;
+
+	if (cnt) {
+		cnt = 0;
+		return -EINVAL;
+	}
+
+	if (system_rev != GAMMA_COMPAT) {
+		pr_err("Incompatible hardware revision: %d\n", system_rev);
+		return -EINVAL;
+	}
+
+	if (cmds_panel_data == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return -EINVAL;
+	}
+
+	ctrl = container_of(cmds_panel_data, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+
+	/*
+	 * Last bit is not written because it's either fixed at 0x00 for
+	 * RGB or a duplicate of the previous bit for the white point.
+	 */
+	dlen = local_pdata->on_cmds.cmds[cmd].dchdr.dlen - 1;
+	if (!dlen)
+		return -EINVAL;
+
+	prev_local_data = local_pdata;
+
+	for (i = 1; i < dlen; i++) {
+		rc = sscanf(buf, "%u", &val);
+		if (rc != 1)
+			return -EINVAL;
+
+		if (val > 255) {
+			pr_err("%s: Invalid input data %u (0-255)\n", __func__, val);
+			local_pdata = prev_local_data;
+			return -EINVAL;
+		}
+
+		local_pdata->on_cmds.cmds[cmd].payload[i] = val;
+		/* white point value must be duplicated */
+		if (cmd == 5)
+			local_pdata->on_cmds.cmds[cmd].payload[i + 1] = val;
+
+		sscanf(buf, "%s", tmp);
+		buf += strlen(tmp) + 1;
+		cnt = strlen(tmp);
+	}
+
+	pr_info("%s\n", __func__);
+
+	return rc;
+}
+
+/************************** sysfs interface ************************/
+
+static ssize_t write_kgamma_send(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	int rc;
+	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+
+	if (cmds_panel_data == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return -EINVAL;
+	}
+
+	ctrl = container_of(cmds_panel_data, struct mdss_dsi_ctrl_pdata,
+			    panel_data);
+
+	if (local_pdata->on_cmds.cmd_cnt)
+		mdss_dsi_panel_cmds_send(ctrl, &local_pdata->on_cmds);
+
+	pr_info("%s\n", __func__);
+
+	return rc;
+}
+
+static DEVICE_ATTR(kgamma_send, 0644, NULL, write_kgamma_send);
+
+#define read_one(file_name, cmd)				\
+static ssize_t read_##file_name					\
+(struct device *dev, struct device_attribute *attr, char *buf)  \
+{								\
+	return read_local_on_cmds(buf, cmd);			\
+}
+
+read_one(kgamma_w,   5);
+read_one(kgamma_rp,  7);
+read_one(kgamma_rn,  9);
+read_one(kgamma_gp, 11);
+read_one(kgamma_gn, 13);
+read_one(kgamma_bp, 15);
+read_one(kgamma_bn, 17);
+
+#define write_one(file_name, cmd)				\
+static ssize_t write_##file_name				\
+(struct device *dev, struct device_attribute *attr, 		\
+		const char *buf, size_t count)  		\
+{								\
+	return write_local_on_cmds(dev, buf, cmd);		\
+}
+
+write_one(kgamma_w,   5);
+write_one(kgamma_rp,  7);
+write_one(kgamma_rn,  9);
+write_one(kgamma_gp, 11);
+write_one(kgamma_gn, 13);
+write_one(kgamma_bp, 15);
+write_one(kgamma_bn, 17);
+
+#define define_one_rw(_name)					\
+static DEVICE_ATTR(_name, 0644, read_##_name, write_##_name);
+
+define_one_rw(kgamma_w);
+define_one_rw(kgamma_rp);
+define_one_rw(kgamma_rn);
+define_one_rw(kgamma_gp);
+define_one_rw(kgamma_gn);
+define_one_rw(kgamma_bp);
+define_one_rw(kgamma_bn);
+
+static struct attribute *dsi_panel_attributes[] = {
+	&dev_attr_kgamma_w.attr,
+	&dev_attr_kgamma_rp.attr,
+	&dev_attr_kgamma_rn.attr,
+	&dev_attr_kgamma_gp.attr,
+	&dev_attr_kgamma_gn.attr,
+	&dev_attr_kgamma_bp.attr,
+	&dev_attr_kgamma_bn.attr,
+	&dev_attr_kgamma_send.attr,
+	NULL
+};
+
+static struct attribute_group dsi_panel_attribute_group = {
+	.attrs = dsi_panel_attributes
+};
+
+/**************************** sysfs end **************************/
+
 static int __devinit mdss_dsi_panel_probe(struct platform_device *pdev)
 {
 	int rc = 0;
@@ -1090,11 +1272,19 @@ static int __devinit mdss_dsi_panel_probe(struct platform_device *pdev)
 	if (rc)
 		return rc;
 
+	local_pdata = &vendor_pdata;
+	if (!local_pdata)
+		return -EINVAL;
+
 #ifdef CONFIG_DEBUG_FS
 	debug_fs_init(&vendor_pdata);
 #endif
 
-	return 0;
+	rc = sysfs_create_group(&pdev->dev.kobj, &dsi_panel_attribute_group);
+	if (rc)
+		pr_err("%s: sysfs create failed: %d\n", panel_name, rc);
+
+	return rc;
 }
 
 static const struct of_device_id mdss_dsi_panel_match[] = {
