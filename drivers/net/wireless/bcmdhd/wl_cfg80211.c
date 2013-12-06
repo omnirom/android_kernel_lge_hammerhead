@@ -10613,7 +10613,10 @@ wl_cfg80211_tdls_oper(struct wiphy *wiphy, struct net_device *dev,
 #ifdef WLTDLS
 	struct wl_priv *wl = wlcfg_drv_priv;
 	tdls_iovar_t info;
+<<<<<<< HEAD
 
+=======
+>>>>>>> aosp/android-msm-hammerhead-3.4-kitkat-mr1
 	memset(&info, 0, sizeof(tdls_iovar_t));
 	if (peer)
 		memcpy(&info.ea, peer, ETHER_ADDR_LEN);
