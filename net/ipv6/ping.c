@@ -58,7 +58,8 @@ static struct inet_protosw pingv6_protosw = {
 
 
 /* Compatibility glue so we can support IPv6 when it's compiled as a module */
-int dummy_ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len)
+int dummy_ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len,
+				 int *addr_len)
 {
 	return -EAFNOSUPPORT;
 }
@@ -81,7 +82,7 @@ int dummy_ipv6_chk_addr(struct net *net, const struct in6_addr *addr,
 
 int __init pingv6_init(void)
 {
-	pingv6_ops.ipv6_recv_error = ipv6_recv_error;
+	pingv6_ops.ipv6_recv_error = *ipv6_recv_error;
 	pingv6_ops.datagram_recv_ctl = datagram_recv_ctl;
 	pingv6_ops.icmpv6_err_convert = icmpv6_err_convert;
 	pingv6_ops.ipv6_icmp_error = ipv6_icmp_error;
