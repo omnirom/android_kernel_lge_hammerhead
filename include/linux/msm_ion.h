@@ -90,7 +90,8 @@ enum cp_mem_usage {
 #define ION_HEAP(bit) (1 << (bit))
 
 #define ION_ADSP_HEAP_NAME	"adsp"
-#define ION_VMALLOC_HEAP_NAME	"vmalloc"
+#define ION_SYSTEM_HEAP_NAME	"system"
+#define ION_VMALLOC_HEAP_NAME	ION_SYSTEM_HEAP_NAME
 #define ION_KMALLOC_HEAP_NAME	"kmalloc"
 #define ION_AUDIO_HEAP_NAME	"audio"
 #define ION_SF_HEAP_NAME	"sf"
@@ -494,6 +495,11 @@ struct ion_flush_data {
 	unsigned int length;
 };
 
+struct ion_prefetch_data {
+       int heap_id;
+       unsigned long len;
+};
+
 #define ION_IOC_MSM_MAGIC 'M'
 
 /**
@@ -517,5 +523,11 @@ struct ion_flush_data {
  */
 #define ION_IOC_CLEAN_INV_CACHES	_IOWR(ION_IOC_MSM_MAGIC, 2, \
 						struct ion_flush_data)
+
+#define ION_IOC_PREFETCH               _IOWR(ION_IOC_MSM_MAGIC, 3, \
+                                               struct ion_prefetch_data)
+
+#define ION_IOC_DRAIN                  _IOWR(ION_IOC_MSM_MAGIC, 4, \
+                                               struct ion_prefetch_data)
 
 #endif
