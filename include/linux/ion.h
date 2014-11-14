@@ -340,7 +340,12 @@ static inline int ion_handle_get_flags(struct ion_client *client,
 struct ion_allocation_data {
 	size_t len;
 	size_t align;
+/* HACK: Kernel needs heap_mask, userspace needs heap_id_mask. Damn Google. */
+#ifdef __KERNEL__
 	unsigned int heap_mask;
+#else
+	unsigned int heap_id_mask;
+#endif
 	unsigned int flags;
 	struct ion_handle *handle;
 };
